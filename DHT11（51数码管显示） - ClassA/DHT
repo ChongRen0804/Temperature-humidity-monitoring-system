@@ -1,0 +1,290 @@
+//只要在keil 下建三个文件后将两个C 后缀的文件添加到工程就可以进行编译.单片机时钟为11.0592M
+//若需要关于DHT11 程序的更详细资料可到百度空间留言
+//现象是循环显示温度和湿度各显示三秒(小数位显示0)
+//若需将dht11.c 和其他的硬件结合使用,只需在需用到温湿度值的文件加下面声明
+//extern int temp_value, humi_value;(temp_value 是温度值,humi_value 是湿度值,比实际的温湿度值扩大了十倍)
+//一、
+//文件名保存为main.c
+/********************************************************************************************/
+//除了dht11 的接口外,其他的电路原理图与天祥的C51 板对应
+//现象是循环显示温度和湿度各显示三秒
+#include "dht11.h"
+#include <reg52.h>
+//数码管位定义
+sbit DULA = P2^6;
+sbit WELA = P2^7;
+#define SET_DULA() (DULA = 1)
+#define RESET_DULA() (DULA = 0)
+#define SET_WELA() (WELA = 1)
+#define RESET_WELA() (WELA = 0)
+//中断计数标志
+static unsigned char flag;
+//数码管编码
+static unsigned char code array[]= {
+0x3f,0x06,0x5b,0x4f,0x66,
+0x6d,0x7d,0x07,0x7f,0x6f
+};
+extern int temp_value, humi_value;
+static void InitTime(void);
+void Delay_1ms(unsigned int ms);
+static void SMG_Display(unsigned int value);
+int main(void)
+{
+unsigned char mark = 0;
+//先等上电稳定
+Delay_1ms(1000);
+//因为读一次数据dht11 才会触发一次采集数据.
+//即在先使用数据时采集一次数据
+ReadTempAndHumi();
+//因为在两次采集数据需一定的时间间隔,这里还可减少
+Delay_1ms(3000);
+//设定定时器
+InitTime();
+while(1)
+{
+//三秒读一次温湿度
+if(flag == 60)
+{
+flag = 0;
+mark++;
+/*
+//读温湿度,可检测函数调用是否失败,
+//函数返回OK(1)表示成功,返回ERROR(0)表示失败
+//OK和ERROR是在DHT11.H中定义的宏
+*/
+ReadTempAndHumi();
+}
+if(mark % 2 == 0)
+{
+//显示温度
+SMG_Display(temp_value);
+}
+else
+{
+//显示湿度
+SMG_Display(humi_value);
+}
+}
+return 0;
+}
+//设定定时器
+static void InitTime(void)
+{
+TH0 = (unsigned char)((65535U - 50000) >> 8);
+TL0 = (unsigned char)(65535U - 50000) ;
+TMOD = 0X01;
+TR0 = 1;
+ET0 = 1;
+EA = 1;
+}
+//数码管显示函数
+static void SMG_Display(unsigned int value)
+{
+unsigned char ge, bai, shi;
+ge = value % 10;
+shi = value % 100 / 10;
+bai = value % 1000 / 100;
+SET_WELA();
+P0 = 0XFE;
+RESET_WELA();
+P0 = 0XFF;
+SET_DULA();
+P0 = array[bai];
+RESET_DULA();
+Delay_1ms(2);
+SET_WELA();
+P0 = 0XFD;
+RESET_WELA();
+P0 = 0XFF;
+SET_DULA();
+P0 = array[shi];
+P0 |= 0x80; /*显示小数点*/
+RESET_DULA();
+Delay_1ms(2);
+SET_WELA();
+P0 = 0XFB;
+RESET_WELA();
+P0 = 0XFF;
+SET_DULA();
+P0 = array[ge];
+RESET_DULA();
+Delay_1ms(2);
+}
+//中断函数
+void timer(void) interrupt 1
+{
+TH0 = (unsigned char)((65535 - 50000) >> 8);
+TL0 = (unsigned char)(65535 - 50000);
+flag++;
+}
+/********************************************************************************************/
+二、
+保存文件名dht11.h（保存时必须命名为dht11.h）
+/********************************************************************************************/
+/********************************************************************************************/
+#ifndef __DHT11_H__
+#define __HDT11_H__
+//设定标志(static unsigned char status)的宏值
+#define OK 1
+#define ERROR 0
+extern void Delay_1ms(unsigned int ms);
+//函数的返回值表示读取数据是否成功 OK 表示成功 ERROR 表示失败
+extern unsigned char ReadTempAndHumi(void);
+#endif
+/********************************************************************************************/
+/********************************************************************************************/
+三、
+保存的文件名是dht11.c
+/********************************************************************************************/
+/********************************************************************************************/
+/********************************************************************************************/
+//单片机时钟为11.0592M
+#include "dht11.h"
+#include <reg52.h>
+//请根据自己的dht11 接的IO 口来改动位定义
+sbit dht11 = P2^0;
+//防止在与硬件通信时发生死循环的计数范围
+#define NUMBER 20
+#define SIZE 5
+static unsigned char status;
+//存放五字节数据的数组
+static unsigned char value_array[SIZE];
+/*可在其他的文件引用温湿度值,实际是温度的整数的10 倍
+如dht11 读回的温度是26,则temp_value = 260, 湿度同理*/
+int temp_value, humi_value;
+static unsigned char ReadValue(void);
+extern void Delay_1ms(unsigned int ms)
+{
+unsigned int x, y;
+for(x = ms; x > 0; x--)
+{
+for(y = 124; y > 0; y--);
+}
+}
+static void Delay_10us(void)
+{
+unsigned char i;
+i--;
+i--;
+i--;
+i--;
+i--;
+i--;
+}
+/*读一个字节的数据*/
+static unsigned char ReadValue(void)
+{
+unsigned char count, value = 0, i;
+status = OK; //设定标志为正常状态
+for(i = 8; i > 0; i--)
+{
+//高位在先
+value <<= 1;
+count = 0;
+//每一位数据前会有一个50us 的低电平时间.等待50us 低电平结束
+while(dht11 == 0 && count++ < NUMBER);
+if(count >= NUMBER)
+{
+status = ERROR; //设定错误标志
+return 0; //函数执行过程发生错误就退出函数
+}
+//26-28us 的高电平表示该位是0,为70us 高电平表该位1
+Delay_10us();
+Delay_10us();
+Delay_10us();
+//延时30us 后检测数据线是否还是高电平
+if(dht11 != 0)
+{
+//进入这里表示该位是1
+value++;
+//等待剩余(约40us)的高电平结束
+while(dht11 != 0 && count++ < NUMBER)
+{
+dht11 = 1;
+}
+if(count >= NUMBER)
+{
+status = ERROR; //设定错误标志
+return 0;
+}
+}
+}
+return (value);
+}
+//读一次的数据,共五字节
+extern unsigned char ReadTempAndHumi(void)
+{
+unsigned char i = 0, check_value = 0,count = 0;
+EA = 0;
+dht11 = 0; //拉低数据线大于18ms 发送开始信号
+Delay_1ms(20); //需大于18 毫秒
+dht11 = 1; //释放数据线,用于检测低电平的应答信号
+//延时20-40us,等待一段时间后检测应答信号,应答信号是从机拉低数据线80us
+Delay_10us();
+Delay_10us();
+Delay_10us();
+Delay_10us();
+if(dht11 != 0) //检测应答信号,应答信号是低电平
+{
+//没应答信号
+EA = 1;
+return ERROR;
+}
+else
+{
+//有应答信号
+while(dht11 == 0 && count++ < NUMBER); //等待应答信号结束
+if(count >= NUMBER) //检测计数器是否超过了设定的范围
+{
+dht11 = 1;
+EA = 1;
+return ERROR; //读数据出错,退出函数
+}
+count = 0;
+dht11 = 1;//释放数据线
+//应答信号后会有一个80us 的高电平，等待高电平结束
+while(dht11 != 0 && count++ < NUMBER);
+if(count >= NUMBER)
+{
+dht11 = 1;
+EA = 1;
+return ERROR; //退出函数
+}
+//读出湿.温度值
+for(i = 0; i < SIZE; i++)
+{
+value_array[i] = ReadValue();
+if(status == ERROR)//调用ReadValue()读数据出错会设定status 为ERROR
+{
+dht11 = 1;
+EA = 1;
+return ERROR;
+}
+//读出的最后一个值是校验值不需加上去
+if(i != SIZE - 1)
+{
+//读出的五字节数据中的前四字节数据和等于第五字节数据表示成功
+check_value += value_array[i];
+}
+}//end for
+//在没用发生函数调用失败时进行校验
+if(check_value == value_array[SIZE - 1])
+{
+//将温湿度扩大10 倍方便分离出每一位
+humi_value = value_array[0] * 10;
+temp_value = value_array[2] * 10;
+dht11 = 1;
+EA = 1;
+return OK; //正确的读出dht11 输出的数据
+}
+else
+{
+//校验数据出错
+EA = 1;
+return ERROR;
+}
+}
+}
+/********************************************************************************************/
+/********************************************************************************************/
+/********************************************************************************************/

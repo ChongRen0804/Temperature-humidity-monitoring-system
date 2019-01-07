@@ -1,0 +1,6 @@
+"DHT11_4.obj",
+"main.obj",
+"CRC_16.obj",
+"lcd.obj" 
+TO "DHT11_4" 
+RAMSIZE(256) 
